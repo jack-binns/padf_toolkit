@@ -1,0 +1,11 @@
+correlationfile = /data/xfm/PATH/TEST_padfcorr_correlation_sum_maskcorrected.dbin
+outpath = /data/xfm/PATH/
+tag = TEST
+wavelength =  6.7018e-11
+nthq =  402
+nq =  128
+nr =  512
+nl =  40
+nlmin =  1
+qmax =  3701500000.0
+rmax =  1.729012e-08
