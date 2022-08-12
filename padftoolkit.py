@@ -1,10 +1,9 @@
-import matplotlib.colors
+import array
+import os
+import timeit
+
 import matplotlib.pyplot as plt
 import numpy as np
-import math
-import os
-import glob
-import array
 
 # Global plotting params
 # Feel free to import matplotlib style sheet instead
@@ -69,8 +68,41 @@ class TestData:
         padfplotter = PadfPlotter(root='test_data\\', tag='TEST', read_config=True)
         padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=4.0e-09,
                                 dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
-        # padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
+        padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
+                                dists=((1, 2, 3, 4, 5, 6, 7, 8)), clims=(-5e52, 5e52), dist_label_type='annotate')
+        padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
+        padfplotter.polar_slice(target_r=2.3e-09)
+        padfplotter.polar_slice(target_r=4.8e-09)
+        # self.run_file_io_speedtest()
         plt.show()
+
+    def run_file_io_speedtest(self):
+        t_dbin = timeit.repeat(lambda: self.test_dbin_read(), number=5, repeat=3)
+        t_npy = timeit.repeat(lambda: self.test_npy_read(), number=5, repeat=3)
+        print(f" npy reading: {np.mean(np.array(t_npy))} s")
+        print(f" dbin reading: {np.mean(np.array(t_dbin))} s")
+
+    def test_dbin_read(self):
+        path = 'test_data\\TEST_padf2_padf.dbin'
+        size = os.path.getsize(path)
+        b = array.array('d')
+        f = open(path, "rb")
+        b.fromfile(f, size // 8)
+        f.close()
+        elle = b.tolist()
+        output = np.array(elle)
+        print("<read_dbin> Reshaping...")
+        print("<read_dbin> Target volume: ", 512 * 512 * 402)
+        sh_path = path.split('\\')[-1]
+        print(f"<read_dbin> {sh_path} volume:  {output.size}")
+        output = output.reshape((512, 512, 402))  #
+        print(f"<read_dbin> {sh_path} shape : {output.shape}")
+        output = np.array(output)
+        return output
+
+    def test_npy_read(self):
+        output = np.load(f"test_data\\TEST_padf2_padf.npy")
+        return output
 
 
 class PadfPlotter:
@@ -80,10 +112,13 @@ class PadfPlotter:
 
     def __init__(self, root: str = '', tag: str = '',
                  nr: int = 0, nq: int = 0, nth: int = 0,
-                 read_config=True):
+                 rmax: float = 0.0, qmax: float = 0.0,
+                 r_plot_lim: float = 0.0, q_plot_lim: float = 0.0,
+                 read_config: bool = True, npy_bkup_flag: bool = True):
         # File I/O variables
         self.root = root
         self.tag = tag
+        self.npy_bkup_flag = npy_bkup_flag
 
         # Volume objects & parameters
         self.padf_volume = np.array([])
@@ -93,10 +128,10 @@ class PadfPlotter:
         self.nth = nth
         self.rscale = 0.25
         self.pix = 0  # Is this needed?
-        self.rmax = 0.0
-        self.qmax = 0.0
-        self.r_plot_lim = 0.0  # r limit to plot to
-        self.q_plot_lim = 0.0  # q limit to plot to
+        self.rmax = rmax
+        self.qmax = qmax
+        self.r_plot_lim = r_plot_lim  # r limit to plot to
+        self.q_plot_lim = q_plot_lim  # q limit to plot to
 
         """
         Display parameters
@@ -108,11 +143,11 @@ class PadfPlotter:
             cfg = ConfigReader(file_path=f'{self.root}\\{self.tag}_padf_config.txt')
             cfg.read_padf_config()
             # Pass config values to this object
-            self.nth = cfg.param_dict['nthq']['val']
-            self.nq = cfg.param_dict['nq']['val']
-            self.nr = cfg.param_dict['nr']['val']
-            self.qmax = cfg.param_dict['qmax']['val']
-            self.rmax = cfg.param_dict['rmax']['val']
+            self.nth = int(cfg.param_dict['nthq']['val'])
+            self.nq = int(cfg.param_dict['nq']['val'])
+            self.nr = int(cfg.param_dict['nr']['val'])
+            self.qmax = float(cfg.param_dict['qmax']['val'])
+            self.rmax = float(cfg.param_dict['rmax']['val'])
         else:
             print(f'<padf_toolkit.PadfPlotter> I am not attempting to read a config file. Please set PADF parameters '
                   f'manually.')
@@ -121,15 +156,28 @@ class PadfPlotter:
         This dictionary contains all the required parameters for each kind of plot. This allows the same functions
         to be applied to corrvol and padfvol plots. Can be extended for other data types if required.
         """
-        self.plot_property_dict = {
-            'padf': {'default_scaling': 1E-9, 'dist_label': "r = (nm)", 'deqd_label': "r = r' (nm)",
-                     'volume': self.padf_volume, 'd_param': self.nr, 'd_plot_limit': self.r_plot_lim,
-                     'dmax': self.rmax, 'theta_extent': 180, 'theta_lim': self.nth // 2,
-                     'dbin_suffix': '_padf2_padf.dbin'},
-            'corr': {'default_scaling': 1E9, 'dist_label': r"q (nm$^{-1}$)", 'deqd_label': "q = q' (nm$^{-1}$)",
-                     'volume': self.corr_volume, 'd_param': self.nq, 'd_plot_limit': self.q_plot_lim,
-                     'dmax': self.qmax, 'theta_extent': 360, 'theta_lim': self.nth,
-                     'dbin_suffix': '_padfcorr_correlation_sum_maskcorrected.dbin'
+        self.plt_props = {
+            'padf': {'default_scaling': 1E-9,
+                     'dist_label': r"$r$ (nm)",
+                     'deqd_label': r"$r = r^\prime$ (nm)",
+                     'volume': self.padf_volume,
+                     'd_param': self.nr,
+                     'd_plot_limit': self.r_plot_lim,
+                     'dmax': self.rmax,
+                     'theta_extent': 180,
+                     'theta_limit': self.nth // 2,
+                     'dbin_suffix': '_padf2_padf'},
+
+            'corr': {'default_scaling': 1E9,
+                     'dist_label': r"$q$ (nm$^{-1}$)",
+                     'deqd_label': r"$q = q^\prime$ (nm$^{-1}$)",
+                     'volume': self.corr_volume,
+                     'd_param': self.nq,
+                     'd_plot_limit': self.q_plot_lim,
+                     'dmax': self.qmax,
+                     'theta_extent': 360,
+                     'theta_limit': self.nth,
+                     'dbin_suffix': '_padfcorr_correlation_sum_maskcorrected'
                      }
         }
 
@@ -153,33 +201,25 @@ class PadfPlotter:
         :return: primarily plots, but can also return the display slice.
         """
         print(f'<plot_d_eq_d> plot type {key}')
-        print(f"<plot_d_eq_d> plotting {self.plot_property_dict[key]['deqd_label']}")
+        print(f"<plot_d_eq_d> plotting {self.plt_props[key]['deqd_label']}")
         # Set variables from dict and check to see what has been passed in and what needs defaulting
-        nd = self.plot_property_dict[key]['d_param']
-        dmax = (self.plot_property_dict[key]['dmax']) / self.plot_property_dict[key]['default_scaling']
-        d_plot_lim = d_plot_lim / self.plot_property_dict[key]['default_scaling']
-        theta_extent = self.plot_property_dict[key]['theta_extent']
-        theta_lim = self.plot_property_dict[key]['theta_lim']
-        # First we check if the volume has already been read in:
-        if np.size(self.plot_property_dict[key]['volume']) == 0:
-            # Volume is empty, go grab it. This is slow
-            volume = self.read_dbin(path=f"{self.root}{self.tag}{self.plot_property_dict[key]['dbin_suffix']}",
-                                    nd=nd,
-                                    nth=int(self.nth))
-        else:
-            volume = self.plot_property_dict[key]['volume']  # Volume has non-zero size, and so we simply point to it
+        nd = self.plt_props[key]['d_param']
+        dmax = (self.plt_props[key]['dmax']) / self.plt_props[key]['default_scaling']
+        d_plot_lim = d_plot_lim / self.plt_props[key]['default_scaling']
+        theta_extent = self.plt_props[key]['theta_extent']
+        theta_lim = self.plt_props[key]['theta_limit']
+        # Volume input
+        volume = self.file_read_handler(key=key)
         # Create blank display arrays
         disp = np.zeros((nd, self.nth))
-        disp_r = np.zeros(nd)
+        disp_th_zero_int = np.zeros(nd)
         # Fill with values
         for i in np.arange(nd):
             disp[i, :] = volume[i, i, :]
-            disp_r[i] = volume[i, i, 0]
-
-        # Create the figure
+            disp_th_zero_int[i] = volume[i, i, 0]
+        # Create the image figure
         plt.figure()
         plt.title(title)
-        # disp = self.normalize_array(disp)
         plt.imshow(disp[:int((d_plot_lim / dmax) * nd), : theta_lim],
                    extent=[0, theta_extent, 0, d_plot_lim],
                    origin='lower',
@@ -187,7 +227,7 @@ class PadfPlotter:
                    aspect='auto',
                    cmap=self.cmap,
                    interpolation='none')
-        plt.ylabel(self.plot_property_dict[key]['deqd_label'])
+        plt.ylabel(self.plt_props[key]['deqd_label'])
         plt.xlabel(r'$\theta$ (degrees)')
         # Set the clims, either manually or using default guesses based on np.min and max
         plt.clim(np.min(disp) * 0.1, np.max(disp) * 0.1) if not clims else plt.clim(clims[0], clims[1])
@@ -198,12 +238,86 @@ class PadfPlotter:
                                                  dist_label_type=dist_label_type)
         plt.xlim(0, theta_extent)
         plt.ylim(0, d_plot_lim)
+        # If the key is 'corr' we want to also subtract the angular average
+        if key == 'corr':
+            self.corr_average_subtraction(volume=volume, d_plot_lim=d_plot_lim)
+
+        # PLot the theta_0 line
+        plt.figure()
+        plt.xlabel(self.plt_props[key]['dist_label'])
+        plt.ylabel(r'Correlation intensity at $\theta=0°$')
+        plt.xlim(0, self.plt_props[key]['dmax'])
+        plt.plot(np.linspace(start=0,
+                             stop=self.plt_props[key]['dmax'],
+                             num=self.plt_props[key]['d_param']),
+                 disp_th_zero_int)
+
+        # Save and show checks
         if save:
             plt.savefig(f'{self.root}{self.tag}_deqd_{key}.png')
             print(f'Figure saved to {self.root}{self.tag}_deqd_{key}.png')
         if show:
             plt.show()
         return disp[:int((d_plot_lim / dmax) * nd), : theta_lim]
+
+    def corr_average_subtraction(self, volume=np.array([]), d_plot_lim: float = 0.0, show=False):
+        nq = self.plt_props['corr']['d_param']
+        dmax = (self.plt_props['corr']['dmax']) / (self.plt_props['corr']['default_scaling'])
+        theta_lim = self.plt_props['corr']['theta_limit']
+        theta_extent = self.plt_props['corr']['theta_extent']
+        disp = np.zeros((nq, self.nth))
+        for i in np.arange(nq):
+            for j in np.arange(self.nth):
+                disp[i, j] = volume[i, i, j]
+        theta_avg = np.mean(disp, axis=1)
+        print(f'{theta_avg.shape=}')
+        disp -= theta_avg[:, None]
+        # Figure details
+        plt.figure()
+        plt.imshow(disp[:int((d_plot_lim / dmax) * nq), : theta_lim],
+                   extent=[0, theta_extent, 0, d_plot_lim],
+                   origin='lower',
+                   aspect='auto',
+                   cmap=self.cmap,
+                   interpolation='none')
+        plt.ylabel(f"Angular-mean-subtracted {self.plt_props['corr']['deqd_label']}")
+        plt.xlabel(r'$\theta$ (degrees)')
+        plt.clim(np.min(disp) * 0.1, np.max(disp) * 0.1)
+        plt.xlim(0, theta_extent)
+        plt.ylim(0, d_plot_lim)
+        if show:
+            plt.show()
+        return disp
+
+    def polar_slice(self, target_r: float = 0.0, title: str = '', clims: tuple = ()):
+        volume = self.file_read_handler(key='padf')
+        unit_scale = self.plt_props['padf']['default_scaling']
+        target_r /= unit_scale
+        rmax = self.rmax / unit_scale
+        r_ioi = int((target_r / rmax) * self.nr)
+        print(f'<polar_slice> target r :: {target_r} ==> {r_ioi}')
+        r_theta_slice = volume[r_ioi, :, :]
+        print(f'<polar_slice> r_theta_slice shape: {r_theta_slice.shape}')
+        plt.figure()
+        ax1 = plt.subplot(projection="polar")
+        ax1.set_thetamin(0)
+        ax1.set_thetamax(180)
+        plt.xlabel(self.plt_props['padf']['dist_label'])
+        plt.ylabel(r'$\theta$ (degrees)', rotation='horizontal')
+        ax1.xaxis.set_label_coords(0.75, 0.15)
+        ax1.yaxis.set_label_coords(0.5, 0.85)
+        plt.title(title)
+        x = np.linspace(0, rmax, r_theta_slice.shape[0])
+        y = np.linspace(0, np.pi, r_theta_slice.shape[-1] // 2)
+        if not clims:
+            clims = (np.min(r_theta_slice) * 0.1, np.max(r_theta_slice) * 0.1)
+        else:
+            clims = (clims[0], clims[1])
+        ax1.pcolormesh(y, x, r_theta_slice[:, :r_theta_slice.shape[-1] // 2],
+                       shading='auto',
+                       cmap=self.cmap,
+                       vmin=clims[0], vmax=clims[1])
+        plt.tight_layout()
 
     """
     Characteristic distance functions
@@ -226,7 +340,7 @@ class PadfPlotter:
         :param dist_mask: tuple, with mask limits for the 'annotate' style.
         :return:
         """
-        th_range = np.arange(0.01, np.deg2rad(self.plot_property_dict[key]['theta_extent']), 0.01)
+        th_range = np.arange(0.01, np.deg2rad(self.plt_props[key]['theta_extent']), 0.01)
         f_ths = []
         label_values = []
         dists = sorted(dists)
@@ -246,10 +360,40 @@ class PadfPlotter:
                 plt.text((0.87 * 180), ypos * 0.95, f'{dists[k]} nm', fontsize=dist_label_size, color=dist_label_color)
         if dist_label_type == 'legend':
             plt.legend()
+        return f_ths
 
     """
     Utility Functions
     """
+
+    def file_read_handler(self, key):
+        # First we check if the volume has already been read in:
+        volume = None
+        if np.size(self.plt_props[key]['volume']) != 0:
+            print('<file_read_handler> Volume already read in, passing back')
+            volume = self.plt_props[key]['volume']  # Volume has non-zero size, and so we simply point to it
+            return volume
+        if np.size(self.plt_props[key]['volume']) == 0:
+            # Volume is empty, let's grab it
+            print('<file_read_handler> No volume in memory, reading from disk')
+            # First let's check if a npy array has been written out and can be read
+            try:
+                print(
+                    f"<file_read_handler> Looking for {self.root}{self.tag}{self.plt_props[key]['dbin_suffix']}.npy")
+                volume = np.load(f"{self.root}{self.tag}{self.plt_props[key]['dbin_suffix']}.npy")
+                self.plt_props[key]['volume'] = volume
+            except IOError:
+                print('<file_read_handler> No npy file found...reading dbin instead ')
+                volume = self.read_dbin(path=f"{self.root}{self.tag}{self.plt_props[key]['dbin_suffix']}.dbin",
+                                        nd=self.plt_props[key]['d_param'],
+                                        nth=int(self.nth))
+                self.plt_props[key]['volume'] = volume
+                if self.npy_bkup_flag:
+                    np.save(f"{self.root}{self.tag}{self.plt_props[key]['dbin_suffix']}.npy", volume)
+                    print(
+                        f"<file_read_handler> I wrote a back up to: {self.root}{self.tag}{self.plt_props[key]['dbin_suffix']}.npy")
+            finally:
+                return volume
 
     def read_dbin(self, path, swapbyteorder=0, nd=0, nth=0):
         """
