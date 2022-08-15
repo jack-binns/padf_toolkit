@@ -22,7 +22,8 @@ def normalize_array(data):
 
 class ConfigReader:
     """
-    Basic object to read padf config files. Should be deprecated once py3padf moves to standard config files.
+    Basic object to read padf config files. Should be deprecated once py3padf moves to standard config files which can
+    be read with configparser.
     Takes a file_path variable pointing to {tag}_padf_config.txt
     """
 
@@ -72,7 +73,7 @@ class TestData:
                                 dists=((1, 2, 3, 4, 5, 6, 7, 8)), clims=(-5e52, 5e52), dist_label_type='annotate')
         padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
         padfplotter.polar_slice(target_r=2.3e-09)
-        padfplotter.polar_slice(target_r=4.8e-09)
+        padfplotter.polar_slice(target_r=4.8e-09, title=r'$r = 4.8$ nm', clims=(-5E52, 5E52), d_plot_lim=8.0)
         # self.run_file_io_speedtest()
         plt.show()
 
@@ -261,6 +262,13 @@ class PadfPlotter:
         return disp[:int((d_plot_lim / dmax) * nd), : theta_lim]
 
     def corr_average_subtraction(self, volume=np.array([]), d_plot_lim: float = 0.0, show=False):
+        """
+        Internal function to subtract the angular mean from the correlation volume plots
+        :param volume: numpy array, will typically be the correlation volume but the function is flexible
+        :param d_plot_lim: maximum plotting distance (typically q)
+        :param show: display flag
+        :return: disp: the mean-corrected correlation volume.
+        """
         nq = self.plt_props['corr']['d_param']
         dmax = (self.plt_props['corr']['dmax']) / (self.plt_props['corr']['default_scaling'])
         theta_lim = self.plt_props['corr']['theta_limit']
@@ -289,7 +297,17 @@ class PadfPlotter:
             plt.show()
         return disp
 
-    def polar_slice(self, target_r: float = 0.0, title: str = '', clims: tuple = ()):
+    def polar_slice(self, target_r: float = 0.0, title: str = '', clims: tuple = (),
+                    d_plot_lim: float = None, show=False):
+        """
+        Polar slice will plot an r vs theta polar semicircle for r= target_r
+        :param show: display flag, False by default
+        :param target_r: fixed r value for which r' and theta are displayed
+        :param title: title of the plot
+        :param clims: colour bar limits
+        :param d_plot_lim: r' limit for display, here unit scaling is applied based on the plt_props dictionary
+        :return: passed axis object back.
+        """
         volume = self.file_read_handler(key='padf')
         unit_scale = self.plt_props['padf']['default_scaling']
         target_r /= unit_scale
@@ -313,11 +331,16 @@ class PadfPlotter:
             clims = (np.min(r_theta_slice) * 0.1, np.max(r_theta_slice) * 0.1)
         else:
             clims = (clims[0], clims[1])
+        if d_plot_lim:
+            ax1.set_ylim([0, d_plot_lim])
         ax1.pcolormesh(y, x, r_theta_slice[:, :r_theta_slice.shape[-1] // 2],
                        shading='auto',
                        cmap=self.cmap,
                        vmin=clims[0], vmax=clims[1])
         plt.tight_layout()
+        if show:
+            plt.show()
+        return ax1
 
     """
     Characteristic distance functions
@@ -367,6 +390,14 @@ class PadfPlotter:
     """
 
     def file_read_handler(self, key):
+        """
+        Handles the reading, and backup to npy, of corr and padf volume files.
+        Can deal with legacy dbin's as well as current npy formats. By default
+        we also write out a npy file if it's not done already. This can be controlled
+        with the self.npy_bkup_flag.
+        :param key: ['padf'/'corr'] determines which volume type is read in
+        :return: returns the volume
+        """
         # First we check if the volume has already been read in:
         volume = None
         if np.size(self.plt_props[key]['volume']) != 0:
