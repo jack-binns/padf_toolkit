@@ -3,12 +3,16 @@ import os
 import timeit
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 
 # Global plotting params
 # Feel free to import matplotlib style sheet instead
-plt.rcParams['axes.linewidth'] = 0.2  # set the value globally
+plt.rcParams['axes.linewidth'] = 0.5  # set the value globally
 plt.rcParams["font.family"] = "Arial"
+plt.rcParams['axes.edgecolor'] = 'black'
+sns.set_style('ticks')
+cmap = sns.color_palette("crest", as_cmap=True)
 
 
 def normalize_array(data):
@@ -67,13 +71,14 @@ class TestData:
     def run_test(self):
         print('Running test, attempting to read param file and load dictionary...')
         padfplotter = PadfPlotter(root='test_data\\', tag='TEST', read_config=True)
-        padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=4.0e-09,
-                                dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
         padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
-                                dists=((1, 2, 3, 4, 5, 6, 7, 8)), clims=(-5e52, 5e52), dist_label_type='annotate')
-        padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
-        padfplotter.polar_slice(target_r=2.3e-09)
-        padfplotter.polar_slice(target_r=4.8e-09, title=r'$r = 4.8$ nm', clims=(-5E52, 5E52), d_plot_lim=8.0)
+                                dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
+        # padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
+        #                         dists=((1, 2, 3, 4, 5, 6, 7, 8)), clims=(-5e52, 5e52), dist_label_type='annotate')
+        # padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
+        # padfplotter.polar_slice(target_r=2.3e-09)
+        # padfplotter.polar_slice(target_r=4.8e-09, title=r'$r = 4.8$ nm', clims=(-5E52, 5E52), d_plot_lim=8.0)
+        padfplotter.line_section(key='padf', target_r=(4.8e-09, 2.3e-09, 6.0e-09))
         # self.run_file_io_speedtest()
         plt.show()
 
@@ -123,7 +128,9 @@ class PadfPlotter:
 
         # Volume objects & parameters
         self.padf_volume = np.array([])
+        self.padf_reqr = None
         self.corr_volume = np.array([])
+        self.corr_qeqq = None
         self.nr = nr
         self.nq = nq
         self.nth = nth
@@ -161,6 +168,7 @@ class PadfPlotter:
             'padf': {'default_scaling': 1E-9,
                      'dist_label': r"$r$ (nm)",
                      'deqd_label': r"$r = r^\prime$ (nm)",
+                     'dist_unit': "nm",
                      'volume': self.padf_volume,
                      'd_param': self.nr,
                      'd_plot_limit': self.r_plot_lim,
@@ -172,6 +180,7 @@ class PadfPlotter:
             'corr': {'default_scaling': 1E9,
                      'dist_label': r"$q$ (nm$^{-1}$)",
                      'deqd_label': r"$q = q^\prime$ (nm$^{-1}$)",
+                     'dist_unit': r"nm$^{-1}$",
                      'volume': self.corr_volume,
                      'd_param': self.nq,
                      'd_plot_limit': self.q_plot_lim,
@@ -251,7 +260,7 @@ class PadfPlotter:
         plt.plot(np.linspace(start=0,
                              stop=self.plt_props[key]['dmax'],
                              num=self.plt_props[key]['d_param']),
-                 disp_th_zero_int)
+                 disp_th_zero_int, color=cmap(1.0))
 
         # Save and show checks
         if save:
@@ -259,6 +268,12 @@ class PadfPlotter:
             print(f'Figure saved to {self.root}{self.tag}_deqd_{key}.png')
         if show:
             plt.show()
+        if self.padf_reqr is None and key == 'padf':
+            self.padf_reqr = disp[:int((d_plot_lim / dmax) * nd), : theta_lim]
+            print(f'created padf r=r slice {self.padf_reqr.shape}')
+        elif self.corr_qeqq is None and key == 'corr':
+            self.corr_qeqq = disp[:int((d_plot_lim / dmax) * nd), : theta_lim]
+            print(f'created corr q=q slice {self.corr_qeqq.shape}')
         return disp[:int((d_plot_lim / dmax) * nd), : theta_lim]
 
     def corr_average_subtraction(self, volume=np.array([]), d_plot_lim: float = 0.0, show=False):
@@ -341,6 +356,43 @@ class PadfPlotter:
         if show:
             plt.show()
         return ax1
+
+    def line_section(self, key: str = '', target_r: tuple = (), show=False, title=''):
+        if not target_r:
+            print('<line_section> no target r values provided, check param target_r=(r1, r2,...,rn)')
+        if key == 'padf':
+            deqd = self.padf_reqr
+        elif key == 'corr':
+            deqd = self.corr_qeqq
+        else:
+            print('<line_section> provide key = ["padf"/"corr"]')
+            deqd = None
+        # Grab relevant values from the plt_props dict
+        dmax = self.plt_props[key]['dmax']
+        d_param = self.plt_props[key]['d_param']
+        unit_scale = self.plt_props[key]['default_scaling']
+        # Create list of matching indexes from which we will extract line sections
+        target_r_indexes = []
+        [target_r_indexes.append(int((ta_rt / dmax) * d_param)) for ta_rt in sorted(target_r)]
+        # Beautify the target_r values for plotting
+        target_r_labels = []
+        [target_r_labels.append(ta_rt / unit_scale) for ta_rt in sorted(target_r)]
+        # print(f'{target_r_indexes=}')
+        # Create the figure object
+        plt.figure()
+        plt.title(title)
+        plt.xlabel(r'$\theta$ (degrees)')
+        plt.ylabel('Correlation Intensity (arb. units)')
+        theta_range = np.linspace(start=0, stop=self.plt_props[key]['theta_extent'],
+                                  num=self.plt_props[key]['theta_limit'])
+        for k, ta_rt in enumerate(target_r_indexes):
+            plt.plot(theta_range, deqd[ta_rt, :],
+                     label=f"{target_r_labels[k]} {self.plt_props[key]['dist_unit']}",
+                     color=cmap(k / (len(target_r_indexes) - 1)))
+        plt.xlim((0, self.plt_props[key]['theta_extent']))
+        plt.legend()
+        if show:
+            plt.show()
 
     """
     Characteristic distance functions
