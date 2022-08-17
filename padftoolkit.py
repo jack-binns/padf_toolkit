@@ -70,21 +70,22 @@ class TestData:
 
     def run_test(self):
         print('Running test, attempting to read param file and load dictionary...')
-        padfplotter = PadfPlotter(root='test_data\\', tag='TEST', read_config=True)
-        padfplotter.plot_d_eq_d(key='padf', show=False, save=False,
-                                dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
-        padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
-                                dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
+        # padfplotter = PadfPlotter(root='test_data\\', tag='TEST', read_config=True)
+        # padfplotter.plot_d_eq_d(key='padf', show=False, save=False,
+        #                         dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
+        # padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
+        #                         dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
         # padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
         #                         dists=((1, 2, 3, 4, 5, 6, 7, 8)), clims=(-5e52, 5e52), dist_label_type='annotate')
         # padfplotter.plot_d_eq_d(key='corr', show=False, d_plot_lim=3701500000)
         # padfplotter.polar_slice(target_r=2.3e-09)
         # padfplotter.polar_slice(target_r=4.8e-09, title=r'$r = 4.8$ nm', clims=(-5E52, 5E52), d_plot_lim=8.0)
-        padfplotter.line_section(key='padf', target_r=(4.8e-09, 2.3e-09, 6.0e-09))
+        # padfplotter.line_section(key='padf', target_r=(4.8e-09, 2.3e-09, 6.0e-09))
         # self.run_file_io_speedtest()
         # Let's run a side-by-side plot
-        # ppa = PadfPlotter(root='test_data\\', tag='TESTA', read_config=True)
-        # ppb = PadfPlotter(root='test_data\\', tag='TESTB', read_config=True)
+        ppa = PadfPlotter(root='test_data\\', tag='TESTA', read_config=True)
+        ppb = PadfPlotter(root='test_data\\', tag='TESTB', read_config=True)
+        ppa.compare_d_eq_d(right_plotter=ppb, d_plot_lim=8.0E-09, clims=(-5e52, 5e52))
         plt.show()
 
     def run_file_io_speedtest(self):
@@ -114,6 +115,7 @@ class TestData:
     def test_npy_read(self):
         output = np.load(f"test_data\\TEST_padf2_padf.npy")
         return output
+
 
 
 class PadfPlotter:
@@ -444,6 +446,88 @@ class PadfPlotter:
         if dist_label_type == 'legend':
             plt.legend()
         return f_ths
+
+    def compare_d_eq_d(self, right_plotter,
+                       title: str = '', d_plot_lim: float = None,
+                       key: str = 'padf',
+                       clims: tuple = (),
+                       save: bool = False,
+                       show: bool = False):
+        # Setting convenient local values from param dict
+        nd = self.plt_props[key]['d_param']
+        dmax = (self.plt_props[key]['dmax']) / self.plt_props[key]['default_scaling']
+        if d_plot_lim is None:
+            d_plot_lim = dmax
+        else:
+            d_plot_lim = d_plot_lim / self.plt_props[key]['default_scaling']
+        theta_extent = self.plt_props[key]['theta_extent']
+        theta_lim = self.plt_props[key]['theta_limit']
+
+        # Grab the left volume
+        left_volume = self.file_read_handler(key=key)
+        # Create blank display arrays
+        left_disp = np.zeros((nd, self.nth))
+        left_disp_th_zero_int = np.zeros(nd)
+        right_disp = np.zeros((nd, self.nth))
+        right_disp_th_zero_int = np.zeros(nd)
+
+        # Fill the left d=d' slice:
+        for i in np.arange(nd):
+            left_disp[i, :] = left_volume[i, i, :]
+            left_disp_th_zero_int[i] = left_volume[i, i, 0]
+
+        # Now we grab the right volume
+        right_volume = right_plotter.file_read_handler(key=key)
+
+        # Fill the right d=d' slice:
+        for j in np.arange(nd):
+            right_disp[j, :] = right_volume[j, j, :]
+            right_disp_th_zero_int[j] = right_volume[j, j, 0]
+
+        # Create the image figure
+        plt.figure()
+        plt.title(title)
+        plt.imshow(left_disp[:int((d_plot_lim / dmax) * nd), : theta_lim // 2],
+                   extent=[0, theta_extent / 2, 0, d_plot_lim],
+                   origin='lower',
+                   # aspect=self.aspect,
+                   aspect='auto',
+                   cmap=self.cmap,
+                   interpolation='none')
+        plt.clim(np.min(left_disp) * 0.1, np.max(left_disp) * 0.1) if not clims else plt.clim(clims[0], clims[1])
+        plt.imshow(right_disp[:int((d_plot_lim / dmax) * nd), theta_lim//2: theta_lim],
+                   extent=[theta_extent / 2, theta_extent, 0, d_plot_lim],
+                   origin='lower',
+                   # aspect=self.aspect,
+                   aspect='auto',
+                   cmap=self.cmap,
+                   interpolation='none')
+        plt.clim(np.min(right_disp) * 0.1, np.max(right_disp) * 0.1) if not clims else plt.clim(clims[0], clims[1])
+        plt.ylabel(self.plt_props[key]['deqd_label'])
+        plt.xlabel(r'$\theta$ (degrees)')
+        # Set the clims, either manually or using default guesses based on np.min and max
+        plt.xlim(0, theta_extent)
+        plt.ylim(0, d_plot_lim)
+
+        # PLot the theta_0 line
+        plt.figure()
+        plt.xlabel(self.plt_props[key]['dist_label'])
+        plt.ylabel(r'Correlation intensity at $\theta=0°$')
+        plt.xlim(0, self.plt_props[key]['dmax'])
+        plt.plot(np.linspace(start=0,
+                             stop=self.plt_props[key]['dmax'],
+                             num=self.plt_props[key]['d_param']),
+                 left_disp_th_zero_int, color=cmap(1.0), label=self.tag)
+        plt.plot(np.linspace(start=0,
+                             stop=self.plt_props[key]['dmax'],
+                             num=self.plt_props[key]['d_param']),
+                 right_disp_th_zero_int, color=cmap(0.5), label=right_plotter.tag)
+        plt.legend()
+        if save:
+            plt.savefig(f'{self.root}{self.tag}_deqd_{key}.png')
+            print(f'Figure saved to {self.root}{self.tag}_deqd_{key}.png')
+        if show:
+            plt.show()
 
     """
     Utility Functions
