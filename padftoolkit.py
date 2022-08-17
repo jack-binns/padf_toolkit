@@ -80,6 +80,9 @@ class TestData:
         # padfplotter.polar_slice(target_r=4.8e-09, title=r'$r = 4.8$ nm', clims=(-5E52, 5E52), d_plot_lim=8.0)
         padfplotter.line_section(key='padf', target_r=(4.8e-09, 2.3e-09, 6.0e-09))
         # self.run_file_io_speedtest()
+        # Let's run a side-by-side plot
+        # ppa = PadfPlotter(root='test_data\\', tag='TESTA', read_config=True)
+        # ppb = PadfPlotter(root='test_data\\', tag='TESTB', read_config=True)
         plt.show()
 
     def run_file_io_speedtest(self):
@@ -293,7 +296,7 @@ class PadfPlotter:
             for j in np.arange(self.nth):
                 disp[i, j] = volume[i, i, j]
         theta_avg = np.mean(disp, axis=1)
-        print(f'{theta_avg.shape=}')
+        # print(f'{theta_avg.shape=}')
         disp -= theta_avg[:, None]
         # Figure details
         plt.figure()
@@ -508,5 +511,4 @@ class PadfPlotter:
 
 if __name__ == '__main__':
     test = TestData()
-    # test.read_config()
     test.run_test()
