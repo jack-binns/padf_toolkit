@@ -71,6 +71,8 @@ class TestData:
     def run_test(self):
         print('Running test, attempting to read param file and load dictionary...')
         padfplotter = PadfPlotter(root='test_data\\', tag='TEST', read_config=True)
+        padfplotter.plot_d_eq_d(key='padf', show=False, save=False,
+                                dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
         padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
                                 dists=((1, 2, 3, 4, 5,)), clims=(-5e52, 5e52), dist_label_type='annotate')
         # padfplotter.plot_d_eq_d(key='padf', show=False, save=False, d_plot_lim=8.0e-09,
@@ -194,7 +196,7 @@ class PadfPlotter:
                      }
         }
 
-    def plot_d_eq_d(self, title: str = '', d_plot_lim: float = 0.0, dists: tuple = (),
+    def plot_d_eq_d(self, title: str = '', d_plot_lim: float = None, dists: tuple = (),
                     dist_line_color: str = 'white',
                     dist_label_type: str = 'legend',
                     key: str = 'padf', clims: tuple = (),
@@ -218,7 +220,10 @@ class PadfPlotter:
         # Set variables from dict and check to see what has been passed in and what needs defaulting
         nd = self.plt_props[key]['d_param']
         dmax = (self.plt_props[key]['dmax']) / self.plt_props[key]['default_scaling']
-        d_plot_lim = d_plot_lim / self.plt_props[key]['default_scaling']
+        if d_plot_lim is None:
+            d_plot_lim = dmax
+        else:
+            d_plot_lim = d_plot_lim / self.plt_props[key]['default_scaling']
         theta_extent = self.plt_props[key]['theta_extent']
         theta_lim = self.plt_props[key]['theta_limit']
         # Volume input
